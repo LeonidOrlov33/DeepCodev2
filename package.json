@@ -1,0 +1,8 @@
+{
+  "name": "deepcode-v2",
+  "version": "2.0.0",
+  "description": "DeepCode v2 - NeuroTeam с Ollama Cloud + Cerebras",
+  "scripts": {
+    "start": "node server.js"
+  }
+}
