@@ -60,30 +60,28 @@ function askOllama(model, systemPrompt, prompt) {
 async function neuroTeam(prompt) {
     console.log('NeuroTeam start...');
 
-    // 3 модели анализируют параллельно
-    const [deepseek, qwen, gemma] = await Promise.all([
-        askOllama('deepseek-v3.1:671b:cloud', 'Ты DeepSeek. Анализируй глубоко. Отвечай на русском.', prompt),
+    // Шаг 1: Qwen и Gemma параллельно
+    const [qwen, gemma] = await Promise.all([
         askOllama('qwen3-coder:480b:cloud', 'Ты Qwen Coder. Пиши код. Отвечай на русском.', prompt),
         askOllama('gemma4:31b:cloud', 'Ты Gemma. Будь креативным. Отвечай на русском.', prompt)
     ]);
 
-    console.log('3 models done, synthesizing...');
+    console.log('2 models done. DeepSeek synthesizing...');
 
-    // GPT-OSS 120B синтезирует
-    const final = await askOllama('gpt-oss:120b:cloud',
-        'Ты - Tech Lead. Синтезируй лучший ответ на основе мнений команды.',
+    // Шаг 2: DeepSeek синтезирует финальный ответ
+    const final = await askOllama('deepseek-v3.1:671b:cloud',
+        'Ты - Tech Lead. Синтезируй лучший ответ на основе мнений команды. Отвечай на русском.',
         'ЗАДАЧА: ' + prompt + '\n\n' +
-        '═══ DeepSeek 671B (анализ) ═══\n' + deepseek + '\n\n' +
-        '═══ Qwen Coder 480B (код) ═══\n' + qwen + '\n\n' +
-        '═══ Gemma 31B (креатив) ═══\n' + gemma + '\n\n' +
-        'Создай ИДЕАЛЬНЫЙ финальный ответ на русском языке. Объедини лучшие идеи, исправь ошибки.'
+        '═══ Qwen Coder 480B ═══\n' + qwen + '\n\n' +
+        '═══ Gemma 31B ═══\n' + gemma + '\n\n' +
+        'Создай ИДЕАЛЬНЫЙ финальный ответ. Объедини лучшие идеи, исправь ошибки.'
     );
 
     console.log('Done!');
 
     return {
         final,
-        models: ['deepseek-671b', 'qwen-coder-480b', 'gemma-31b', 'gpt-oss-120b']
+        models: ['qwen-coder-480b', 'gemma-31b', 'deepseek-671b']
     };
 }
 
@@ -99,7 +97,7 @@ const server = http.createServer(async (req, res) => {
         res.end(JSON.stringify({
             service: 'DeepCode v2 - NeuroTeam',
             status: 'online',
-            team: ['deepseek-671b', 'qwen-coder-480b', 'gemma-31b', 'gpt-oss-120b'],
+            team: ['qwen-coder-480b', 'gemma-31b', 'deepseek-671b'],
             provider: 'Ollama Cloud'
         }));
         return;
