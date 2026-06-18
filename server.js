@@ -4,7 +4,6 @@ const https = require('https');
 const OLLAMA_KEY = process.env.OLLAMA_KEY;
 const OLLAMA_URL = 'https://ollama.ai/api/openai/v1';
 const HF_KEY = process.env.HF_KEY;
-const HF_URL = 'https://api-inference.huggingface.co/models';
 
 const USERS = {
     [process.env.ADMIN_KEY || 'admin-key']: 'Admin',
@@ -100,33 +99,23 @@ function askHF(model, prompt) {
 }
 
 async function neuroTeam(prompt) {
-    console.log('NeuroTeam start...');
+    console.log('NeuroTeam: Kimi + GPT...');
 
-    // Шаг 1: Qwen + Gemma + Kimi параллельно
-    const [qwen, gemma, kimi] = await Promise.all([
-        askOllama('qwen3-coder:480b:cloud', 'Ты Qwen Coder. Пиши код. Отвечай на русском.', prompt),
-        askOllama('gemma4:31b:cloud', 'Ты Gemma. Будь креативным. Отвечай на русском.', prompt),
-        askHF('moonshotai/Kimi-K2.7-Code', 'Задача: ' + prompt + '\nДай подробный анализ и решение.')
-    ]);
+    // Шаг 1: Kimi анализирует
+    const kimi = await askHF('moonshotai/Kimi-K2.7-Code',
+        'Задача: ' + prompt + '\nДай подробный анализ и лучшее решение.'
+    );
 
-    console.log('3 models done. GPT-OSS synthesizing...');
+    console.log('Kimi done. GPT synthesizing...');
 
-    // Шаг 2: GPT-OSS синтезирует
+    // Шаг 2: GPT синтезирует финальный ответ
     const final = await askOllama('gpt-oss:120b:cloud',
-        'Ты - Tech Lead. Синтезируй лучший ответ на основе мнений команды. Отвечай на русском.',
-        'ЗАДАЧА: ' + prompt + '\n\n' +
-        '═══ Qwen Coder 480B ═══\n' + qwen + '\n\n' +
-        '═══ Gemma 31B ═══\n' + gemma + '\n\n' +
-        '═══ Kimi K2.7 Code (HF) ═══\n' + kimi + '\n\n' +
-        'Создай ИДЕАЛЬНЫЙ финальный ответ. Объедини лучшие идеи, исправь ошибки.'
+        'Ты - эксперт. Синтезируй лучший ответ на основе анализа. Отвечай на русском.',
+        'ЗАДАЧА: ' + prompt + '\n\nАНАЛИЗ KIMI:\n' + kimi + '\n\nДай ПОЛНЫЙ финальный ответ.'
     );
 
     console.log('Done!');
-
-    return {
-        final,
-        models: ['qwen-coder-480b', 'gemma-31b', 'kimi-k2.7-code', 'gpt-oss-120b']
-    };
+    return { final, models: ['kimi-k2.7-code', 'gpt-oss-120b'] };
 }
 
 const server = http.createServer(async (req, res) => {
@@ -141,8 +130,8 @@ const server = http.createServer(async (req, res) => {
         res.end(JSON.stringify({
             service: 'DeepCode v2 - NeuroTeam',
             status: 'online',
-            team: ['qwen-coder-480b', 'gemma-31b', 'kimi-k2.7-code', 'gpt-oss-120b'],
-            providers: ['Ollama Cloud', 'HuggingFace']
+            team: ['kimi-k2.7-code', 'gpt-oss-120b'],
+            providers: ['HuggingFace', 'Ollama Cloud']
         }));
         return;
     }
@@ -159,7 +148,6 @@ const server = http.createServer(async (req, res) => {
                 const prompt = data.prompt || data.messages?.find(m => m.role === 'user')?.content || '';
                 stats.total++;
 
-                console.log('Request: ' + prompt.substring(0, 50) + '...');
                 const result = await neuroTeam(prompt);
 
                 res.writeHead(200, { 'Content-Type': 'application/json' });
