@@ -5,7 +5,7 @@ import traceback
 import httpx
 from fastapi import FastAPI, HTTPException, Header
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import List
 
 # --- ИНИЦИАЛИЗАЦИЯ ---
 app = FastAPI(title="DeepCode Team API (Turbo)")
@@ -14,12 +14,12 @@ app = FastAPI(title="DeepCode Team API (Turbo)")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 SHARED_API_KEY = os.getenv("SHARED_API_KEY", "sk-deepcode-v3")
 
-# --- РОЛИ АГЕНТОВ (АКТУАЛЬНЫЕ МОДЕЛИ GROQ) ---
+# --- РОЛИ АГЕНТОВ (АКТУАЛЬНЫЕ МОДЕЛИ GROQ ИЮНЬ 2026) ---
 AGENTS = {
     "coder": {
-        "name": "Qwen 2.5 Coder",
+        "name": "Llama 3.1 Instant Coder",
         "system": "Ты эксперт по Python. Пиши чистый, рабочий код с комментариями. Отвечай только кодом и кратким пояснением.",
-        "model": "qwen-2.5-coder-32b"
+        "model": "llama-3.1-8b-instant"
     },
     "reviewer": {
         "name": "Llama 3.3 Reviewer", 
@@ -28,7 +28,7 @@ AGENTS = {
     },
     "architect": {
         "name": "Llama 3.3 Architect",
-        "system": "Ты System Architect. Собери финальный ответ: исправленный код + объяснение. Не упоминай обсуждение.",
+        "system": "Ты System Architect. Собери финальный ответ: исправленный код + объяснение. Не упоминай внутреннее обсуждение или роли агентов.",
         "model": "llama-3.3-70b-versatile"
     }
 }
@@ -47,9 +47,9 @@ async def call_groq(model_id: str, messages: list) -> str:
 
 # --- БЫСТРАЯ ЛОГИКА КОМАНДЫ ---
 async def run_team_discussion(user_query: str) -> str:
-    print(f" Turbo Team started for: {user_query[:50]}...")
+    print(f"🚀 Turbo Team started for: {user_query[:50]}...")
     
-    # 1. Coder пишет черновик (Qwen 2.5 - мгновенно)
+    # 1. Coder пишет черновик (Llama 3.1 8b Instant - мгновенно)
     print("   ⚡ Step 1: Coder generating draft...")
     coder_msgs = [
         {"role": "system", "content": AGENTS["coder"]["system"]},
@@ -72,7 +72,7 @@ async def run_team_discussion(user_query: str) -> str:
     print("   ⚡ Step 3: Architect synthesizing...")
     arch_msgs = [
         {"role": "system", "content": AGENTS["architect"]["system"]},
-        {"role": "user", "content": f"Исходная задача: {user_query}\n\nРезультат проверки:\n{review_result}"}
+        {"role": "user", "content": f"Исходная задача: {user_query}\n\nРезультат проверки и исправлений:\n{review_result}"}
     ]
     final_answer = await call_groq(AGENTS["architect"]["model"], arch_msgs)
     print("   ✅ Final answer ready!")
@@ -94,7 +94,8 @@ async def chat(request: ChatRequest, authorization: str = Header(None)):
         raise HTTPException(status_code=401, detail="Invalid API Key")
     
     user_msgs = [m for m in request.messages if m.role == "user"]
-    if not user_msgs: raise HTTPException(status_code=400, detail="No user message")
+    if not user_msgs: 
+        raise HTTPException(status_code=400, detail="No user message")
     
     try:
         start_time = time.time()
@@ -104,32 +105,40 @@ async def chat(request: ChatRequest, authorization: str = Header(None)):
         print(f"⏱️ Request completed in {duration:.2f}s")
         
         return {
-            "id": "chatcmpl-turbo", "object": "chat.completion",
-            "created": int(time.time()), "model": request.model,
-            "choices": [{"index": 0, "message": {"role": "assistant", "content": final_answer}, "finish_reason": "stop"}],
+            "id": "chatcmpl-turbo", 
+            "object": "chat.completion",
+            "created": int(time.time()), 
+            "model": request.model,
+            "choices": [{
+                "index": 0, 
+                "message": {"role": "assistant", "content": final_answer}, 
+                "finish_reason": "stop"
+            }],
             "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
         }
     except Exception as e:
         error_trace = traceback.format_exc()
-        print(f" ERROR: {error_trace}")
+        print(f"❌ ERROR: {error_trace}")
         raise HTTPException(status_code=500, detail=str(e)[:300])
 
 @app.get("/")
 async def root():
     return {"status": "DeepCode Turbo API Running", "key": "sk-deepcode-v3"}
 
-# --- KEEP-ALIVE ---
+# --- KEEP-ALIVE ДЛЯ RENDER ---
 async def keep_alive():
+    """Отправляет запрос сам себе каждые 11 минут, чтобы Render не засыпал."""
     while True:
         try:
             async with httpx.AsyncClient() as client:
                 await client.get("http://localhost:10000/", timeout=5.0)
-                print("🔔 Keep-alive ping sent")
+                print("🔔 Keep-alive ping sent successfully")
         except Exception as e:
-            print(f"️ Ping failed: {e}")
-        await asyncio.sleep(660)
+            print(f"⚠️ Keep-alive failed: {e}")
+        
+        await asyncio.sleep(660) # 11 минут
 
 @app.on_event("startup")
 async def startup_event():
     asyncio.create_task(keep_alive())
-    print("✅ Keep-alive started. Turbo mode active.")
+    print("✅ Keep-alive task started. Turbo mode active.")
