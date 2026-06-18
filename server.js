@@ -2,7 +2,6 @@ const http = require('http');
 const https = require('https');
 
 const OLLAMA_KEY = process.env.OLLAMA_KEY;
-const CEREBRAS_KEY = process.env.CEREBRAS_API_KEY;
 const OLLAMA_URL = 'https://ollama.ai/api/openai/v1';
 
 const USERS = {
@@ -58,59 +57,34 @@ function askOllama(model, systemPrompt, prompt) {
     });
 }
 
-function askCerebras(prompt) {
-    return new Promise((resolve) => {
-        const data = JSON.stringify({
-            model: 'llama3.3-70b',
-            messages: [{ role: 'user', content: prompt }],
-            max_tokens: 4000,
-            temperature: 0.7
-        });
-
-        const options = {
-            hostname: 'api.cerebras.ai',
-            path: '/v1/chat/completions',
-            method: 'POST',
-            headers: {
-                'Authorization': 'Bearer ' + CEREBRAS_KEY,
-                'Content-Type': 'application/json',
-                'Content-Length': Buffer.byteLength(data)
-            },
-            timeout: 60000
-        };
-
-        const req = https.request(options, (res) => {
-            let body = '';
-            res.on('data', chunk => body += chunk);
-            res.on('end', () => {
-                try {
-                    const json = JSON.parse(body);
-                    resolve(json.choices?.[0]?.message?.content || '[Cerebras Error]');
-                } catch (e) {
-                    resolve('[Cerebras Error]');
-                }
-            });
-        });
-
-        req.on('error', () => resolve('[Cerebras Error]'));
-        req.on('timeout', () => { req.destroy(); resolve('[Cerebras Timeout]'); });
-        req.write(data);
-        req.end();
-    });
-}
-
 async function neuroTeam(prompt) {
+    console.log('NeuroTeam start...');
+
+    // 3 модели анализируют параллельно
     const [deepseek, qwen, gemma] = await Promise.all([
-        askOllama('deepseek-v3.1:671b:cloud', 'Ты DeepSeek. Анализируй. Отвечай на русском.', prompt),
+        askOllama('deepseek-v3.1:671b:cloud', 'Ты DeepSeek. Анализируй глубоко. Отвечай на русском.', prompt),
         askOllama('qwen3-coder:480b:cloud', 'Ты Qwen Coder. Пиши код. Отвечай на русском.', prompt),
         askOllama('gemma4:31b:cloud', 'Ты Gemma. Будь креативным. Отвечай на русском.', prompt)
     ]);
 
-    const final = await askCerebras(
-        'ЗАДАЧА: ' + prompt + '\n\nDeepSeek: ' + deepseek + '\n\nQwen: ' + qwen + '\n\nGemma: ' + gemma + '\n\nСинтезируй лучший ответ на русском.'
+    console.log('3 models done, synthesizing...');
+
+    // GPT-OSS 120B синтезирует
+    const final = await askOllama('gpt-oss:120b:cloud',
+        'Ты - Tech Lead. Синтезируй лучший ответ на основе мнений команды.',
+        'ЗАДАЧА: ' + prompt + '\n\n' +
+        '═══ DeepSeek 671B (анализ) ═══\n' + deepseek + '\n\n' +
+        '═══ Qwen Coder 480B (код) ═══\n' + qwen + '\n\n' +
+        '═══ Gemma 31B (креатив) ═══\n' + gemma + '\n\n' +
+        'Создай ИДЕАЛЬНЫЙ финальный ответ на русском языке. Объедини лучшие идеи, исправь ошибки.'
     );
 
-    return { final, models: ['deepseek-671b', 'qwen-coder-480b', 'gemma-31b', 'cerebras-llama-70b'] };
+    console.log('Done!');
+
+    return {
+        final,
+        models: ['deepseek-671b', 'qwen-coder-480b', 'gemma-31b', 'gpt-oss-120b']
+    };
 }
 
 const server = http.createServer(async (req, res) => {
@@ -122,7 +96,12 @@ const server = http.createServer(async (req, res) => {
 
     if (req.url === '/' || req.url === '/health') {
         res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ service: 'DeepCode v2', status: 'online', team: ['deepseek-671b', 'qwen-coder-480b', 'gemma-31b', 'cerebras-llama-70b'] }));
+        res.end(JSON.stringify({
+            service: 'DeepCode v2 - NeuroTeam',
+            status: 'online',
+            team: ['deepseek-671b', 'qwen-coder-480b', 'gemma-31b', 'gpt-oss-120b'],
+            provider: 'Ollama Cloud'
+        }));
         return;
     }
 
@@ -144,10 +123,10 @@ const server = http.createServer(async (req, res) => {
             try {
                 const data = JSON.parse(body);
                 const prompt = data.prompt || data.messages?.find(m => m.role === 'user')?.content || '';
-                
+
                 stats.total++;
                 stats.lastRequest = new Date().toISOString();
-                
+
                 console.log('Request: ' + prompt.substring(0, 50) + '...');
                 const startTime = Date.now();
                 const result = await neuroTeam(prompt);
@@ -155,7 +134,6 @@ const server = http.createServer(async (req, res) => {
                 console.log('Done in ' + elapsed + 's');
 
                 if (req.url === '/v1/chat/completions') {
-                    // OpenAI-compatible format
                     res.writeHead(200, { 'Content-Type': 'application/json' });
                     res.end(JSON.stringify({
                         id: 'neuro-' + Date.now(),
