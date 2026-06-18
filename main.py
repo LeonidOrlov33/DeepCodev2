@@ -1,32 +1,6 @@
-import asyncio
-import httpx
-
-# --- KEEP-ALIVE ДЛЯ RENDER ---
-async def keep_alive():
-    """Отправляет запрос сам себе каждые 11 минут, чтобы Render не засыпал."""
-    while True:
-        try:
-            async with httpx.AsyncClient() as client:
-                # Запрос к корневому эндпоинту (самый легкий)
-                await client.get("http://localhost:10000/", timeout=5.0)
-                print(" Keep-alive ping sent successfully")
-        except Exception as e:
-            print(f"⚠️ Keep-alive failed: {e}")
-        
-        # Ждем 11 минут (660 секунд). 
-        # Render усыпляет через 15 мин, так что 11 мин — безопасный запас.
-        await asyncio.sleep(660)
-
-# Запускаем фоновую задачу при старте приложения
-@app.on_event("startup")
-async def startup_event():
-    asyncio.create_task(keep_alive())
-    print("✅ Keep-alive task started. Service will stay awake.")
-
-
-
-
 import os
+import time
+import asyncio
 import httpx
 from fastapi import FastAPI, HTTPException, Header
 from pydantic import BaseModel
@@ -34,6 +8,7 @@ from typing import List, Optional
 from google import genai
 from ollama import Client as OllamaClient
 
+# --- ИНИЦИАЛИЗАЦИЯ ПРИЛОЖЕНИЯ ---
 app = FastAPI(title="DeepCode Team API")
 
 # --- КОНФИГУРАЦИЯ ---
@@ -141,12 +116,11 @@ async def run_team_discussion(user_query: str, rounds: int = 2) -> str:
                 if other != agent_name: history[other].append(assistant_msg)
             history[agent_name].append(assistant_msg)
 
-    # Финальный синтез
     synthesis_prompt = "Предоставь ПОЛНЫЙ ФИНАЛЬНЫЙ ОТВЕТ пользователю на основе обсуждения выше. Не упоминай агентов или внутреннюю переписку. Если есть код — включи его полностью."
     history["ollama"].append({"role": "user", "content": synthesis_prompt})
     return await call_ollama(AGENTS["ollama"]["model_id"], history["ollama"])
 
-# --- ENDPOINT ---
+# --- ENDPOINT'Ы ---
 
 class ChatMessage(BaseModel):
     role: str
@@ -168,7 +142,7 @@ async def chat(request: ChatRequest, authorization: str = Header(None)):
         final_answer = await run_team_discussion(user_msgs[-1].content, rounds=2)
         return {
             "id": "chatcmpl-deepcode", "object": "chat.completion",
-            "created": int(__import__('time').time()), "model": request.model,
+            "created": int(time.time()), "model": request.model,
             "choices": [{"index": 0, "message": {"role": "assistant", "content": final_answer}, "finish_reason": "stop"}],
             "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
         }
@@ -178,3 +152,22 @@ async def chat(request: ChatRequest, authorization: str = Header(None)):
 @app.get("/")
 async def root():
     return {"status": "DeepCode Team API Running", "key": "sk-deepcode-v3"}
+
+# --- KEEP-ALIVE ДЛЯ RENDER (В САМОМ НИЗУ!) ---
+
+async def keep_alive():
+    """Отправляет запрос сам себе каждые 11 минут, чтобы Render не засыпал."""
+    while True:
+        try:
+            async with httpx.AsyncClient() as client:
+                await client.get("http://localhost:10000/", timeout=5.0)
+                print("🔔 Keep-alive ping sent successfully")
+        except Exception as e:
+            print(f"⚠️ Keep-alive failed: {e}")
+        
+        await asyncio.sleep(660) # 11 минут
+
+@app.on_event("startup")
+async def startup_event():
+    asyncio.create_task(keep_alive())
+    print("✅ Keep-alive task started. Service will stay awake.")
