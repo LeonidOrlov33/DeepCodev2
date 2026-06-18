@@ -3,6 +3,8 @@ const https = require('https');
 
 const OLLAMA_KEY = process.env.OLLAMA_KEY;
 const OLLAMA_URL = 'https://ollama.ai/api/openai/v1';
+const HF_KEY = process.env.HF_KEY;
+const HF_URL = 'https://api-inference.huggingface.co/models';
 
 const USERS = {
     [process.env.ADMIN_KEY || 'admin-key']: 'Admin',
@@ -10,7 +12,7 @@ const USERS = {
     [process.env.FRIEND2_KEY || 'friend2']: 'Friend 2'
 };
 
-let stats = { total: 0, lastRequest: null, uptime: Date.now() };
+let stats = { total: 0 };
 
 function askOllama(model, systemPrompt, prompt) {
     return new Promise((resolve) => {
@@ -57,23 +59,65 @@ function askOllama(model, systemPrompt, prompt) {
     });
 }
 
+function askHF(model, prompt) {
+    return new Promise((resolve) => {
+        const data = JSON.stringify({
+            inputs: prompt,
+            parameters: { max_new_tokens: 4000, temperature: 0.7 }
+        });
+
+        const options = {
+            hostname: 'api-inference.huggingface.co',
+            path: '/models/' + model,
+            method: 'POST',
+            headers: {
+                'Authorization': 'Bearer ' + HF_KEY,
+                'Content-Type': 'application/json',
+                'Content-Length': Buffer.byteLength(data)
+            },
+            timeout: 120000
+        };
+
+        const req = https.request(options, (res) => {
+            let body = '';
+            res.on('data', chunk => body += chunk);
+            res.on('end', () => {
+                try {
+                    const json = JSON.parse(body);
+                    const text = json[0]?.generated_text || json.generated_text || '[' + model + ' Error]';
+                    resolve(text);
+                } catch (e) {
+                    resolve('[' + model + ' Error]');
+                }
+            });
+        });
+
+        req.on('error', () => resolve('[' + model + ' Error]'));
+        req.on('timeout', () => { req.destroy(); resolve('[' + model + ' Timeout]'); });
+        req.write(data);
+        req.end();
+    });
+}
+
 async function neuroTeam(prompt) {
     console.log('NeuroTeam start...');
 
-    // Шаг 1: Qwen и Gemma параллельно
-    const [qwen, gemma] = await Promise.all([
+    // Шаг 1: Qwen + Gemma + Kimi параллельно
+    const [qwen, gemma, kimi] = await Promise.all([
         askOllama('qwen3-coder:480b:cloud', 'Ты Qwen Coder. Пиши код. Отвечай на русском.', prompt),
-        askOllama('gemma4:31b:cloud', 'Ты Gemma. Будь креативным. Отвечай на русском.', prompt)
+        askOllama('gemma4:31b:cloud', 'Ты Gemma. Будь креативным. Отвечай на русском.', prompt),
+        askHF('moonshotai/Kimi-K2.7-Code', 'Задача: ' + prompt + '\nДай подробный анализ и решение.')
     ]);
 
-    console.log('2 models done. DeepSeek synthesizing...');
+    console.log('3 models done. GPT-OSS synthesizing...');
 
-    // Шаг 2: DeepSeek синтезирует финальный ответ
-    const final = await askOllama('deepseek-v3.1:671b:cloud',
+    // Шаг 2: GPT-OSS синтезирует
+    const final = await askOllama('gpt-oss:120b:cloud',
         'Ты - Tech Lead. Синтезируй лучший ответ на основе мнений команды. Отвечай на русском.',
         'ЗАДАЧА: ' + prompt + '\n\n' +
         '═══ Qwen Coder 480B ═══\n' + qwen + '\n\n' +
         '═══ Gemma 31B ═══\n' + gemma + '\n\n' +
+        '═══ Kimi K2.7 Code (HF) ═══\n' + kimi + '\n\n' +
         'Создай ИДЕАЛЬНЫЙ финальный ответ. Объедини лучшие идеи, исправь ошибки.'
     );
 
@@ -81,7 +125,7 @@ async function neuroTeam(prompt) {
 
     return {
         final,
-        models: ['qwen-coder-480b', 'gemma-31b', 'deepseek-671b']
+        models: ['qwen-coder-480b', 'gemma-31b', 'kimi-k2.7-code', 'gpt-oss-120b']
     };
 }
 
@@ -97,17 +141,9 @@ const server = http.createServer(async (req, res) => {
         res.end(JSON.stringify({
             service: 'DeepCode v2 - NeuroTeam',
             status: 'online',
-            team: ['qwen-coder-480b', 'gemma-31b', 'deepseek-671b'],
-            provider: 'Ollama Cloud'
+            team: ['qwen-coder-480b', 'gemma-31b', 'kimi-k2.7-code', 'gpt-oss-120b'],
+            providers: ['Ollama Cloud', 'HuggingFace']
         }));
-        return;
-    }
-
-    if (req.url === '/stats' && req.method === 'GET') {
-        const key = (req.headers.authorization || '').replace('Bearer ', '');
-        if (key !== process.env.ADMIN_KEY) { res.writeHead(403); res.end('{}'); return; }
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify(stats));
         return;
     }
 
@@ -121,30 +157,18 @@ const server = http.createServer(async (req, res) => {
             try {
                 const data = JSON.parse(body);
                 const prompt = data.prompt || data.messages?.find(m => m.role === 'user')?.content || '';
-
                 stats.total++;
-                stats.lastRequest = new Date().toISOString();
 
                 console.log('Request: ' + prompt.substring(0, 50) + '...');
-                const startTime = Date.now();
                 const result = await neuroTeam(prompt);
-                const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-                console.log('Done in ' + elapsed + 's');
 
-                if (req.url === '/v1/chat/completions') {
-                    res.writeHead(200, { 'Content-Type': 'application/json' });
-                    res.end(JSON.stringify({
-                        id: 'neuro-' + Date.now(),
-                        object: 'chat.completion',
-                        created: Math.floor(Date.now() / 1000),
-                        model: 'neuro-team-v2',
-                        choices: [{ index: 0, message: { role: 'assistant', content: result.final }, finish_reason: 'stop' }],
-                        usage: { prompt_tokens: prompt.length, completion_tokens: result.final.length, total_tokens: prompt.length + result.final.length }
-                    }));
-                } else {
-                    res.writeHead(200, { 'Content-Type': 'application/json' });
-                    res.end(JSON.stringify({ success: true, final_answer: result.final, models_used: result.models, time_seconds: parseFloat(elapsed) }));
-                }
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({
+                    id: 'neuro-' + Date.now(),
+                    object: 'chat.completion',
+                    model: 'neuro-team-v2',
+                    choices: [{ index: 0, message: { role: 'assistant', content: result.final }, finish_reason: 'stop' }]
+                }));
             } catch (e) {
                 res.writeHead(500); res.end(JSON.stringify({ error: e.message }));
             }
