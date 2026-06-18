@@ -14,22 +14,22 @@ app = FastAPI(title="DeepCode Team API (Turbo)")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 SHARED_API_KEY = os.getenv("SHARED_API_KEY", "sk-deepcode-v3")
 
-# --- РОЛИ АГЕНТОВ (ВСЕ НА GROQ ДЛЯ СКОРОСТИ) ---
+# --- РОЛИ АГЕНТОВ (АКТУАЛЬНЫЕ МОДЕЛИ GROQ) ---
 AGENTS = {
     "coder": {
-        "name": "Llama 8b Coder",
+        "name": "Qwen 2.5 Coder",
         "system": "Ты эксперт по Python. Пиши чистый, рабочий код с комментариями. Отвечай только кодом и кратким пояснением.",
-        "model": "llama3-8b-8192" # Самый быстрый для генерации
+        "model": "qwen-2.5-coder-32b"
     },
     "reviewer": {
-        "name": "Llama 70b Reviewer", 
+        "name": "Llama 3.3 Reviewer", 
         "system": "Ты Senior Code Reviewer. Найди баги, уязвимости и предложи исправления. Будь краток.",
-        "model": "llama3-70b-8192" # Умный, но быстрый
+        "model": "llama-3.3-70b-versatile"
     },
     "architect": {
-        "name": "Llama 70b Architect",
+        "name": "Llama 3.3 Architect",
         "system": "Ты System Architect. Собери финальный ответ: исправленный код + объяснение. Не упоминай обсуждение.",
-        "model": "llama3-70b-8192"
+        "model": "llama-3.3-70b-versatile"
     }
 }
 
@@ -47,9 +47,9 @@ async def call_groq(model_id: str, messages: list) -> str:
 
 # --- БЫСТРАЯ ЛОГИКА КОМАНДЫ ---
 async def run_team_discussion(user_query: str) -> str:
-    print(f"🚀 Turbo Team started for: {user_query[:50]}...")
+    print(f" Turbo Team started for: {user_query[:50]}...")
     
-    # 1. Coder пишет черновик (Llama 8b - мгновенно)
+    # 1. Coder пишет черновик (Qwen 2.5 - мгновенно)
     print("   ⚡ Step 1: Coder generating draft...")
     coder_msgs = [
         {"role": "system", "content": AGENTS["coder"]["system"]},
@@ -58,7 +58,7 @@ async def run_team_discussion(user_query: str) -> str:
     code_draft = await call_groq(AGENTS["coder"]["model"], coder_msgs)
     print("   ✅ Coder done.")
 
-    # 2. Reviewer проверяет (Llama 70b)
+    # 2. Reviewer проверяет (Llama 3.3 70b)
     print("   ⚡ Step 2: Reviewer checking...")
     reviewer_msgs = [
         {"role": "system", "content": AGENTS["reviewer"]["system"]},
@@ -111,7 +111,7 @@ async def chat(request: ChatRequest, authorization: str = Header(None)):
         }
     except Exception as e:
         error_trace = traceback.format_exc()
-        print(f"❌ ERROR: {error_trace}")
+        print(f" ERROR: {error_trace}")
         raise HTTPException(status_code=500, detail=str(e)[:300])
 
 @app.get("/")
@@ -124,9 +124,9 @@ async def keep_alive():
         try:
             async with httpx.AsyncClient() as client:
                 await client.get("http://localhost:10000/", timeout=5.0)
-                print(" Keep-alive ping sent")
+                print("🔔 Keep-alive ping sent")
         except Exception as e:
-            print(f"⚠️ Ping failed: {e}")
+            print(f"️ Ping failed: {e}")
         await asyncio.sleep(660)
 
 @app.on_event("startup")
