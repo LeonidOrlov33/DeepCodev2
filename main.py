@@ -1,6 +1,7 @@
 import os
 import time
 import asyncio
+import traceback
 import httpx
 from fastapi import FastAPI, HTTPException, Header
 from pydantic import BaseModel
@@ -101,16 +102,19 @@ async def run_team_discussion(user_query: str, rounds: int = 2) -> str:
     order = ["kimi", "groq", "gemini", "ollama"]
     last_response = ""
     
-    for _ in range(rounds):
+    for r in range(rounds):
+        print(f"🔄 Starting round {r+1}/{rounds}")
         for agent_name in order:
             agent = AGENTS[agent_name]
             provider = agent["provider"]
+            print(f"   🤖 Calling {agent_name} ({provider})...")
             
             if provider == "hf": last_response = await call_hf(agent["model_id"], history[agent_name])
             elif provider == "groq": last_response = await call_groq(agent["model_id"], history[agent_name])
             elif provider == "gemini": last_response = await call_gemini(agent["model_id"], history[agent_name])
             elif provider == "ollama": last_response = await call_ollama(agent["model_id"], history[agent_name])
             
+            print(f"   ✅ {agent_name} responded.")
             assistant_msg = {"role": "assistant", "content": last_response}
             for other in order:
                 if other != agent_name: history[other].append(assistant_msg)
@@ -118,6 +122,7 @@ async def run_team_discussion(user_query: str, rounds: int = 2) -> str:
 
     synthesis_prompt = "Предоставь ПОЛНЫЙ ФИНАЛЬНЫЙ ОТВЕТ пользователю на основе обсуждения выше. Не упоминай агентов или внутреннюю переписку. Если есть код — включи его полностью."
     history["ollama"].append({"role": "user", "content": synthesis_prompt})
+    print("🏁 Generating final synthesis via Ollama...")
     return await call_ollama(AGENTS["ollama"]["model_id"], history["ollama"])
 
 # --- ENDPOINT'Ы ---
@@ -136,10 +141,13 @@ async def chat(request: ChatRequest, authorization: str = Header(None)):
         raise HTTPException(status_code=401, detail="Invalid API Key")
     
     user_msgs = [m for m in request.messages if m.role == "user"]
-    if not user_msgs: raise HTTPException(status_code=400, detail="No user message")
+    if not user_msgs: 
+        raise HTTPException(status_code=400, detail="No user message")
     
     try:
+        print(f"\n🚀 NEW REQUEST: {user_msgs[-1].content[:100]}...")
         final_answer = await run_team_discussion(user_msgs[-1].content, rounds=2)
+        print("✅ TEAM DISCUSSION COMPLETED SUCCESSFULLY!\n")
         return {
             "id": "chatcmpl-deepcode", "object": "chat.completion",
             "created": int(time.time()), "model": request.model,
@@ -147,13 +155,21 @@ async def chat(request: ChatRequest, authorization: str = Header(None)):
             "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        error_trace = traceback.format_exc()
+        print(f"\n❌ CRITICAL ERROR IN TEAM DISCUSSION:")
+        print(error_trace)
+        print(f"Error details: {str(e)}\n")
+        
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Team Discussion Failed: {str(e)[:300]}"
+        )
 
 @app.get("/")
 async def root():
     return {"status": "DeepCode Team API Running", "key": "sk-deepcode-v3"}
 
-# --- KEEP-ALIVE ДЛЯ RENDER (В САМОМ НИЗУ!) ---
+# --- KEEP-ALIVE ДЛЯ RENDER ---
 
 async def keep_alive():
     """Отправляет запрос сам себе каждые 11 минут, чтобы Render не засыпал."""
