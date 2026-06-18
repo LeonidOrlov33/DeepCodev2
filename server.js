@@ -1,22 +1,18 @@
 const http = require('http');
 const https = require('https');
 
-// Конфигурация
 const OLLAMA_KEY = process.env.OLLAMA_KEY;
-const OLLAMA_URL = 'https://ollama.ai/api/openai/v1';
 const CEREBRAS_KEY = process.env.CEREBRAS_API_KEY;
+const OLLAMA_URL = 'https://ollama.ai/api/openai/v1';
 
-// Пользователи
 const USERS = {
     [process.env.ADMIN_KEY || 'admin-key']: 'Admin',
     [process.env.FRIEND1_KEY || 'friend1']: 'Friend 1',
     [process.env.FRIEND2_KEY || 'friend2']: 'Friend 2'
 };
 
-// Статистика
 let stats = { total: 0, lastRequest: null, uptime: Date.now() };
 
-// Запрос к Ollama
 function askOllama(model, systemPrompt, prompt) {
     return new Promise((resolve) => {
         const data = JSON.stringify({
@@ -48,25 +44,20 @@ function askOllama(model, systemPrompt, prompt) {
             res.on('end', () => {
                 try {
                     const json = JSON.parse(body);
-                    if (json.choices && json.choices[0]) {
-                        resolve(json.choices[0].message.content);
-                    } else {
-                        resolve('[' + model + ' Error: ' + body.substring(0, 200) + ']');
-                    }
+                    resolve(json.choices?.[0]?.message?.content || '[' + model + ' Error]');
                 } catch (e) {
-                    resolve('[' + model + ' Parse Error]');
+                    resolve('[' + model + ' Error]');
                 }
             });
         });
 
-        req.on('error', (e) => resolve('[' + model + ' Error: ' + e.message + ']'));
+        req.on('error', () => resolve('[' + model + ' Error]'));
         req.on('timeout', () => { req.destroy(); resolve('[' + model + ' Timeout]'); });
         req.write(data);
         req.end();
     });
 }
 
-// Запрос к Cerebras (Llama 70B)
 function askCerebras(prompt) {
     return new Promise((resolve) => {
         const data = JSON.stringify({
@@ -94,13 +85,9 @@ function askCerebras(prompt) {
             res.on('end', () => {
                 try {
                     const json = JSON.parse(body);
-                    if (json.choices && json.choices[0]) {
-                        resolve(json.choices[0].message.content);
-                    } else {
-                        resolve('[Cerebras Error: ' + body.substring(0, 200) + ']');
-                    }
+                    resolve(json.choices?.[0]?.message?.content || '[Cerebras Error]');
                 } catch (e) {
-                    resolve('[Cerebras Parse Error]');
+                    resolve('[Cerebras Error]');
                 }
             });
         });
@@ -112,55 +99,20 @@ function askCerebras(prompt) {
     });
 }
 
-// Режим: NeuroTeam
 async function neuroTeam(prompt) {
-    console.log('🧠 NeuroTeam запуск...');
-
-    // Шаг 1: Три модели от Ollama параллельно
-    console.log('├─ DeepSeek 671B думает...');
-    console.log('├─ Qwen Coder 480B думает...');
-    console.log('├─ Gemma 31B думает...');
-
     const [deepseek, qwen, gemma] = await Promise.all([
-        askOllama('deepseek-v3.1:671b:cloud',
-            'Ты - DeepSeek V3.1 671B. Анализируй задачу глубоко, проверяй логику, предлагай улучшения. Отвечай на русском.',
-            prompt),
-        askOllama('qwen3-coder:480b:cloud',
-            'Ты - Qwen Coder 480B. Специалист по программированию. Пиши чистый эффективный код с пояснениями. Отвечай на русском.',
-            prompt),
-        askOllama('gemma4:31b:cloud',
-            'Ты - Gemma 4 31B. Подходи к задаче творчески, предлагай альтернативные решения. Отвечай на русском.',
-            prompt)
+        askOllama('deepseek-v3.1:671b:cloud', 'Ты DeepSeek. Анализируй. Отвечай на русском.', prompt),
+        askOllama('qwen3-coder:480b:cloud', 'Ты Qwen Coder. Пиши код. Отвечай на русском.', prompt),
+        askOllama('gemma4:31b:cloud', 'Ты Gemma. Будь креативным. Отвечай на русском.', prompt)
     ]);
 
-    console.log('├─ Три модели ответили');
-
-    // Шаг 2: Cerebras Llama 70B синтезирует
-    console.log('├─ Cerebras Llama 70B синтезирует...');
-
     const final = await askCerebras(
-        'Ты - Tech Lead (Llama 70B). Синтезируй лучший ответ на основе мнений команды.\n\n' +
-        '═══ ЗАДАЧА ═══\n' + prompt + '\n\n' +
-        '═══ DeepSeek 671B (анализ) ═══\n' + deepseek + '\n\n' +
-        '═══ Qwen Coder 480B (код) ═══\n' + qwen + '\n\n' +
-        '═══ Gemma 31B (творческий подход) ═══\n' + gemma + '\n\n' +
-        'Создай ИДЕАЛЬНЫЙ финальный ответ:\n' +
-        '1. Возьми лучшие идеи от каждого\n' +
-        '2. Исправь ошибки и противоречия\n' +
-        '3. Выдай полное, готовое к использованию решение\n' +
-        '4. Ответ должен быть на русском языке'
+        'ЗАДАЧА: ' + prompt + '\n\nDeepSeek: ' + deepseek + '\n\nQwen: ' + qwen + '\n\nGemma: ' + gemma + '\n\nСинтезируй лучший ответ на русском.'
     );
 
-    console.log('✅ Готово!');
-
-    return {
-        final_answer: final,
-        models: ['deepseek-v3.1:671b', 'qwen3-coder:480b', 'gemma4:31b', 'cerebras-llama3.3-70b'],
-        discussion: { deepseek, qwen, gemma }
-    };
+    return { final, models: ['deepseek-671b', 'qwen-coder-480b', 'gemma-31b', 'cerebras-llama-70b'] };
 }
 
-// Сервер
 const server = http.createServer(async (req, res) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type');
@@ -170,38 +122,20 @@ const server = http.createServer(async (req, res) => {
 
     if (req.url === '/' || req.url === '/health') {
         res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({
-            service: '🧠 DeepCode v2 - NeuroTeam',
-            status: 'online',
-            team: {
-                deepseek: 'DeepSeek V3.1 671B (Ollama)',
-                qwen: 'Qwen Coder 480B (Ollama)',
-                gemma: 'Gemma 4 31B (Ollama)',
-                synthesizer: 'Llama 3.3 70B (Cerebras)'
-            },
-            uptime_hours: Math.round((Date.now() - stats.uptime) / 3600000),
-            total_requests: stats.total
-        }));
+        res.end(JSON.stringify({ service: 'DeepCode v2', status: 'online', team: ['deepseek-671b', 'qwen-coder-480b', 'gemma-31b', 'cerebras-llama-70b'] }));
         return;
     }
 
     if (req.url === '/stats' && req.method === 'GET') {
-        const auth = req.headers.authorization || '';
-        if (auth.replace('Bearer ', '') !== process.env.ADMIN_KEY) {
-            res.writeHead(403); res.end(JSON.stringify({ error: 'Forbidden' })); return;
-        }
+        const key = (req.headers.authorization || '').replace('Bearer ', '');
+        if (key !== process.env.ADMIN_KEY) { res.writeHead(403); res.end('{}'); return; }
         res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({
-            total_requests: stats.total,
-            last_request: stats.lastRequest,
-            uptime_hours: Math.round((Date.now() - stats.uptime) / 3600000)
-        }));
+        res.end(JSON.stringify(stats));
         return;
     }
 
     if ((req.url === '/v1/chat' || req.url === '/v1/chat/completions') && req.method === 'POST') {
-        const auth = req.headers.authorization || '';
-        const key = auth.replace('Bearer ', '');
+        const key = (req.headers.authorization || '').replace('Bearer ', '');
         if (!USERS[key]) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
 
         let body = '';
@@ -209,34 +143,32 @@ const server = http.createServer(async (req, res) => {
         req.on('end', async () => {
             try {
                 const data = JSON.parse(body);
-                const prompt = data.prompt || data.messages?.[data.messages.length - 1]?.content || '';
+                const prompt = data.prompt || data.messages?.find(m => m.role === 'user')?.content || '';
                 
                 stats.total++;
                 stats.lastRequest = new Date().toISOString();
                 
-                console.log('\n' + '='.repeat(60));
-                console.log('👤 ' + USERS[key] + ' | 📝 ' + prompt.substring(0, 80) + '...');
-
+                console.log('Request: ' + prompt.substring(0, 50) + '...');
                 const startTime = Date.now();
                 const result = await neuroTeam(prompt);
                 const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+                console.log('Done in ' + elapsed + 's');
 
-                console.log('⏱ ' + elapsed + 's | 🤖 ' + result.models.join(', '));
-                console.log('='.repeat(60) + '\n');
-
-                const response = {
-                    success: true,
-                    final_answer: result.final_answer,
-                    models_used: result.models,
-                    time_seconds: parseFloat(elapsed)
-                };
-
-                if (data.show_discussion) {
-                    response.team_discussion = result.discussion;
+                if (req.url === '/v1/chat/completions') {
+                    // OpenAI-compatible format
+                    res.writeHead(200, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({
+                        id: 'neuro-' + Date.now(),
+                        object: 'chat.completion',
+                        created: Math.floor(Date.now() / 1000),
+                        model: 'neuro-team-v2',
+                        choices: [{ index: 0, message: { role: 'assistant', content: result.final }, finish_reason: 'stop' }],
+                        usage: { prompt_tokens: prompt.length, completion_tokens: result.final.length, total_tokens: prompt.length + result.final.length }
+                    }));
+                } else {
+                    res.writeHead(200, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ success: true, final_answer: result.final, models_used: result.models, time_seconds: parseFloat(elapsed) }));
                 }
-
-                res.writeHead(200, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify(response));
             } catch (e) {
                 res.writeHead(500); res.end(JSON.stringify({ error: e.message }));
             }
@@ -248,7 +180,4 @@ const server = http.createServer(async (req, res) => {
 });
 
 const PORT = process.env.PORT || 8080;
-server.listen(PORT, () => {
-    console.log('🧠 DeepCode v2 на порту ' + PORT);
-    console.log('👥 Команда: DeepSeek 671B + Qwen 480B + Gemma 31B → Cerebras Llama 70B');
-});
+server.listen(PORT, () => console.log('DeepCode v2 on port ' + PORT));
