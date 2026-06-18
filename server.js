@@ -109,7 +109,7 @@ async function neuroTeam(prompt) {
     console.log('Kimi done. GPT synthesizing...');
 
     // Шаг 2: GPT синтезирует финальный ответ
-    const final = await askOllama('gpt-oss:120b:cloud',
+    const final = await askOllama('gpt-oss:120b-cloud',
         'Ты - эксперт. Синтезируй лучший ответ на основе анализа. Отвечай на русском.',
         'ЗАДАЧА: ' + prompt + '\n\nАНАЛИЗ KIMI:\n' + kimi + '\n\nДай ПОЛНЫЙ финальный ответ.'
     );
