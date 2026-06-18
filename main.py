@@ -1,3 +1,31 @@
+import asyncio
+import httpx
+
+# --- KEEP-ALIVE ДЛЯ RENDER ---
+async def keep_alive():
+    """Отправляет запрос сам себе каждые 11 минут, чтобы Render не засыпал."""
+    while True:
+        try:
+            async with httpx.AsyncClient() as client:
+                # Запрос к корневому эндпоинту (самый легкий)
+                await client.get("http://localhost:10000/", timeout=5.0)
+                print(" Keep-alive ping sent successfully")
+        except Exception as e:
+            print(f"⚠️ Keep-alive failed: {e}")
+        
+        # Ждем 11 минут (660 секунд). 
+        # Render усыпляет через 15 мин, так что 11 мин — безопасный запас.
+        await asyncio.sleep(660)
+
+# Запускаем фоновую задачу при старте приложения
+@app.on_event("startup")
+async def startup_event():
+    asyncio.create_task(keep_alive())
+    print("✅ Keep-alive task started. Service will stay awake.")
+
+
+
+
 import os
 import httpx
 from fastapi import FastAPI, HTTPException, Header
